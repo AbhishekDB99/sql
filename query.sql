@@ -3045,3 +3045,498 @@ SELECT
   DELETE FROM po_process_logs WHERE production_order_id = 8;
   
   DELETE FROM po_process_stage_logs  WHERE production_order_id = 8;
+
+  -- What is the result?
+SELECT MAX(id) FROM machine_tags mt;
+
+SELECT nextval('machine_tags_id_seq');
+
+
+BEGIN;
+-- protect against concurrent inserts while you update the counter
+LOCK TABLE machine_tags IN EXCLUSIVE MODE;
+-- Update the sequence
+SELECT setval('machine_tags_id_seq', COALESCE((SELECT MAX(id)+1 FROM machine_tags), 1), false);
+COMMIT;
+
+
+
+
+WITH running_po AS (
+      SELECT
+          ppl.production_order_id, po.master_sach_id, ppl.master_process_id
+        FROM po_process_logs ppl
+        LEFT JOIN production_orders po ON po.id = ppl.production_order_id
+        WHERE
+          ppl.machine_id = $1 AND
+          ppl.production_order_id =$2 AND
+          ppl.started_on IS NOT NULL AND ppl.completed_on IS NULL
+        ORDER BY ppl.id DESC LIMIT 1
+    ),
+    recipe AS (
+      SELECT sr.master_sach_id, recipe.KEY AS field, recipe.value
+      FROM sach_revisions sr
+      LEFT JOIN running_po ON true
+      left JOIN jsonb_each_text(recipe->'product_recipe') recipe ON true
+      WHERE sr.master_sach_id = running_po.master_sach_id AND sr.master_process_id = running_po.master_process_id
+    )
+    SELECT
+      kmt.id,
+      kmt."name",
+      lower(kmt."name") lower_name,
+      COALESCE ( kmt.display_name, kmt."name") AS display_name,
+      kmtg."name" AS tag_group,
+      concat(km.channel_name, '.', km.machine_name, '.', kmtg."name", '.', kmt.name) AS node_id,
+      concat(km.channel_name, '.', km.machine_name) AS machine_prefix,
+      pr.value,
+      CASE 
+        WHEN lower(kmt."name") like '%otp_prod_rcp_gun1%'
+        THEN 'g1'
+        WHEN lower(kmt."name") like '%otp_prod_rcp_gun2%'
+        THEN 'g2'
+      END AS gun,
+      COALESCE ( kmt.min_value, 1) min_value,
+      COALESCE ( kmt.max_value, 400) max_value,
+      kmtd.datatype_name AS datatype,
+      kmt.config->>'type' AS category
+    FROM machine_tags kmt
+    left JOIN machines km ON (km.id = kmt.machine_id )
+    left JOIN machine_tag_groups kmtg ON (kmtg.id = kmt.tag_group_id )
+    left JOIN machine_tag_datatypes kmtd ON (kmtd.datatype_id = kmt.tag_datatype)
+    LEFT JOIN recipe AS pr ON ( pr.field = lower(kmt."name") )
+    WHERE kmt.machine_id = $1 AND kmt.tag_group_id = $3
+    ORDER BY kmt.order_num 
+    
+    
+     SELECT
+      mc.id, mc.name, mc.rfid_epc
+    FROM material_carriers mc
+    WHERE $1 = ANY(master_process_ids)
+      AND mc.id NOT IN (
+        SELECT DISTINCT  material_carrier_id  FROM material_carrier_usage_logs mcul
+        LEFT JOIN masking_wheel_operation_log mwol ON mwol.wheel_carrier_id = mcul.material_carrier_id  
+        WHERE mcul.binded_on IS NOT NULL AND released_on IS NULL AND mcul.disassociated_on IS NULL 
+      )
+      
+      
+SELECT 
+mwol.production_order_id ,
+mwol .wheel_carrier_id ,
+mwol .element_wheel_count 
+FROM masking_wheel_operation_log mwol 
+WHERE mwol.wheel_operation_id =2 AND mwol.production_order_id = 8 AND mwol.wheel_carrier_id = 409
+
+
+UPDATE material_carrier_usage_logs 
+SET disassociated_on = current_timestamp 
+WHERE material_carrier_id IN  (
+SELECT id FROM material_carriers mc WHERE mc."name" LIKE '%' || (
+     SELECT 
+        substring(mc.name, 1, 24) AS name
+       from material_carriers mc 
+    where mc.id = $1
+        ) || '%'
+  )
+  
+  
+CREATE TABLE public.tools (
+    id serial4 NOT NULL,
+    tool_name text NOT NULL,
+    tool_specifications _float4 NULL,
+    CONSTRAINT tools_pk PRIMARY KEY (id)
+);
+
+
+CREATE TABLE public.tool_details (
+    id bigserial NOT NULL,
+    process_id int4 NOT NULL,
+    part_id int4 NOT NULL,
+    tool_id int4 NOT NULL,
+    tool_value text NOT NULL,
+    value_type varchar(20) NOT NULL DEFAULT 'number'::character varying,
+    created_by int4 NOT NULL,
+    created_on timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    update_by int4 NULL,
+    update_on timestamptz NULL,
+    CONSTRAINT tool_details_pk PRIMARY KEY (id)
+);
+
+
+CREATE TABLE public.tool_selection_rules (
+    id serial4 NOT NULL,
+    process_id int4 NOT NULL,
+    rule_name varchar(50) NOT NULL,
+    tool_ids _int4 NOT NULL,
+    created_by int4 NOT NULL,
+    created_on timestamptz NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    CONSTRAINT tool_selection_rules_pk PRIMARY KEY (id)
+);
+
+
+
+SELECT 
+t.tool_name AS name ,
+td.tool_value AS required_value,
+t.tool_specifications AS list
+FROM tool_details td 
+LEFT JOIN tools t  ON t.id = td.tool_id 
+WHERE part_id =1
+
+
+SELECT
+      po.id AS po_id,
+      ls.id AS ls_id,
+      msn.id AS sach_id,
+      po.po_number,
+      po.po_type order_type,
+      msn.sach_no,
+      element_per_wheel,
+--      CASE
+--        WHEN mp.process_number = 220
+--        THEN po.taping_quantity
+--        ELSE po.target_quantity
+--      END AS target_quantity,
+      ls.ls_value,
+      po.box_size,
+      po.pmt_delay_weeks,
+      po.completed_on,
+      po.is_capa_raised,
+      po.remarks,
+      po.current_master_process_id,
+      COALESCE (ttl.trolley_id,NULL) AS trolley_id,
+      jsonb_array_elements_text(COALESCE (sr.recipe -> 'spray_material','[null]'::jsonb)) as material,
+      CASE WHEN ppl2.id IS NOT NULL THEN true ELSE false END AS po_in_process,
+      CASE WHEN ppl2.id IS NOT NULL AND ppl2.setup_completed_on IS NOT NULL THEN true ELSE false END AS init_setup_done
+    FROM
+      production_orders po
+    JOIN master_sach_nos msn ON msn.id = po.master_sach_id
+    JOIN sach_allowed_machines sam ON (sam.sach_id = msn.id AND sam.process_id = po.current_master_process_id)
+    JOIN master_lead_spaces ls ON ls.id = msn.master_lead_space_id
+    JOIN master_processes mp ON mp.id = po.current_master_process_id
+    LEFT JOIN po_process_logs ppl2 ON (ppl2.production_order_id = po.id AND ppl2.machine_id = $2 AND ppl2.started_on IS NOT NULL)
+    LEFT JOIN sach_revisions sr on po.master_sach_id  = sr.master_sach_id
+    LEFT JOIN tempering_trolley_log ttl ON ttl.production_order_id =po.id
+    --LEFT JOIN aoi_process_stage_log apl ON apl.production_order_id = po.id
+    --LEFT JOIN LATERAL jsonb_array_elements_text(sr.recipe -> 'spray_material') as material ON true
+    WHERE
+      $2 = ANY(sam.machine_ids) AND
+      po.current_master_process_id = $1 AND
+      po.id NOT IN (SELECT production_order_id FROM po_process_logs ppl WHERE machine_id <> $2 AND master_process_id = $1 AND started_on IS NOT NULL AND completed_on IS NULL)
+      AND po.completed_on IS NULL
+  	  AND sr.master_process_id  =$1
+    ORDER BY po.id
+    
+    
+    
+    SELECT
+  po.id AS po_id,
+  ls.id AS ls_id,
+  msn.id AS sach_id,
+  po.po_number,
+  po.po_type order_type,
+  msn.sach_no,
+  element_per_wheel,
+  po.target_quantity,
+  ls.ls_value,
+  po.box_size,
+  po.pmt_delay_weeks,
+  po.completed_on,
+  po.is_capa_raised,
+  po.remarks,
+  po.current_master_process_id,
+  COALESCE (ttl.trolley_id,NULL) AS trolley_id,
+--jsonb_text(sr.recipe -> 'spray_material') as material,
+  jsonb_array_elements_text(COALESCE (sr.recipe -> 'spray_material','[null]'::jsonb)) as material,
+  CASE WHEN ppl2.id IS NOT NULL THEN true ELSE false END AS po_in_process
+--CASE WHEN ppl2.id IS NOT NULL AND ppl2.setup_completed_on IS NOT NULL THEN true ELSE false END AS init_setup_done
+  FROM
+  production_orders po
+JOIN master_sach_nos msn ON msn.id = po.master_sach_id
+LEFT JOIN po_process_logs ppl2 ON (ppl2.production_order_id = po.id AND ppl2.machine_id = $2 AND ppl2.started_on IS NOT NULL AND ppl2.completed_on IS NULL)
+JOIN sach_allowed_machines sam ON (sam.sach_id = msn.id AND sam.process_id = po.current_master_process_id)
+JOIN master_lead_spaces ls ON ls.id = msn.master_lead_space_id
+left JOIN sach_revisions sr on po.master_sach_id  = sr.master_sach_id
+LEFT JOIN tempering_trolley_log ttl ON ttl.production_order_id =po.id
+--LEFT JOIN LATERAL jsonb_array_elements_text(sr.recipe -> 'spray_material') as material ON true
+WHERE
+  $2 = ANY(sam.machine_ids) AND
+  po.id NOT IN (SELECT production_order_id FROM po_process_logs ppl WHERE machine_id <> $2 AND started_on IS NOT NULL)
+  AND po.completed_on IS NULL
+  AND sr.master_process_id  =$1
+ORDER BY po.id
+
+
+SELECT 
+        t.tool_name AS name ,
+        td.tool_value AS required_value,
+        t.tool_specifications AS list,
+        td.tool_id
+    FROM tool_details td 
+    LEFT JOIN tools t  ON t.id = td.tool_id 
+    WHERE part_id = $1
+    
+    
+    
+    
+    
+WITH running_po AS (
+      SELECT
+        ppl.production_order_id, po.master_sach_id, ppl.master_process_id
+        FROM po_process_logs ppl
+        LEFT JOIN production_orders po ON po.id = ppl.production_order_id
+        LEFT JOIN machines m ON (m.id = ppl.machine_id)
+      WHERE
+        (m.id = $1 OR $1 = ANY(m.linked_machine_ids) ) AND
+        ppl.started_on IS NOT NULL AND ppl.completed_on IS NULL
+      ORDER BY ppl.id DESC LIMIT 1
+    ),
+    recipe AS (
+      SELECT sr.master_sach_id, recipe.KEY AS field, recipe.value
+      FROM sach_revisions sr
+      LEFT JOIN running_po ON true
+      JOIN jsonb_each_text(recipe->'product_recipe') recipe ON true
+      WHERE sr.master_sach_id = running_po.master_sach_id AND sr.master_process_id = running_po.master_process_id
+    )
+    SELECT
+      kmt.id,
+      kmt."name",
+      lower(kmt."name") lower_name,
+      COALESCE ( kmt.display_name, kmt."name") AS display_name,
+      kmtg."name" AS tag_group,
+      concat(km.channel_name, '.', km.machine_name, '.', kmtg."name", '.', kmt.name) AS node_id,
+      concat(km.channel_name, '.', km.machine_name) AS machine_prefix,
+      pr.value,
+      CASE 
+        WHEN lower(kmt."name") like '%otp_prod_rcp_gun1%'
+        THEN 'g1'
+        WHEN lower(kmt."name") like '%otp_prod_rcp_gun2%'
+        THEN 'g2'
+      END AS gun,
+      COALESCE ( kmt.min_value, 1) min_value,
+      COALESCE ( kmt.max_value, 400) max_value,
+--      kmtd.datatype_name AS datatype,
+      kmt.config->>'type' AS category
+    FROM machine_tags kmt
+    JOIN machines km ON (km.id = kmt.machine_id )
+    JOIN machine_tag_groups kmtg ON (kmtg.id = kmt.tag_group_id )
+--    JOIN machine_tag_datatypes kmtd ON (kmtd.datatype_id = kmt.tag_datatype)
+    LEFT JOIN recipe AS pr ON ( pr.field = lower(kmt."name") )
+    WHERE kmt.machine_id = $1 AND kmt.tag_group_id = $2
+    ORDER BY kmt.id
+    
+
+
+INSERT INTO public.machine_tag_datatypes (datatype_id,datatype_name) VALUES
+     (0,'string'),
+     (1,'boolean'),
+     (2,'char'),
+     (3,'byte'),
+     (4,'short'),
+     (5,'word'),
+     (6,'long'),
+     (7,'dword'),
+     (8,'float'),
+     (9,'double');
+     
+    
+    
+    SELECT
+      po.id AS po_id,
+      ls.id AS ls_id,
+      msn.id AS sach_id,
+      po.po_number,
+      po.po_type order_type,
+      msn.sach_no,
+      element_per_wheel,
+      po.target_quantity,
+      ls.ls_value,
+      po.box_size,
+      po.pmt_delay_weeks,
+      po.completed_on,
+      po.is_capa_raised,
+      po.remarks,
+      po.current_master_process_id,
+      CASE WHEN ppl2.id IS NOT NULL THEN true ELSE false END AS po_in_process
+      --CASE WHEN ppl2.id IS NOT NULL AND ppl2.setup_completed_on IS NOT NULL THEN true ELSE false END AS init_setup_done
+    FROM
+      production_orders po
+    JOIN master_sach_nos msn ON msn.id = po.master_sach_id
+    LEFT JOIN po_process_logs ppl2 ON (ppl2.production_order_id = po.id AND ppl2.machine_id = $1 AND ppl2.started_on IS NOT NULL AND ppl2.completed_on IS NULL)
+    JOIN sach_allowed_machines sam ON (sam.sach_id = msn.id AND sam.process_id = po.current_master_process_id)
+    JOIN master_lead_spaces ls ON ls.id = msn.master_lead_space_id
+    WHERE
+      $1 = ANY(sam.machine_ids) AND
+      po.id NOT IN (SELECT production_order_id FROM po_process_logs ppl WHERE machine_id <> $1 AND started_on IS NOT NULL)
+      AND po.completed_on IS NULL
+      AND sr.master_process_id  =$1
+    ORDER BY po.id
+    
+SELECT
+tp.id ,
+tp.param_name ,
+tp.sample_size ,
+tp.order_num ,
+tp.input_type,
+tpt.min,
+tpt.max
+FROM test_params tp 
+JOIN test_sub_type tst ON tst.id = tp.test_sub_type_id 
+JOIN test_param_tolerance tpt ON tpt.test_param_id  = tp.id 
+WHERE tst.id = (SELECT tst.id FROM test_sub_type tst WHERE tst."name" = $2) AND tp.process_id = $1
+    
+INSERT INTO public.test
+(production_order_id, process_id, test_sub_type, created_by, created_on, completed_on, completed_by)
+VALUES(0, 0, '', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, 0);
+
+SELECT 
+t.id,
+t.production_order_id 
+FROM test t 
+JOIN test_sub_type tst ON tst.id = t.test_sub_type 
+WHERE t.production_order_id =122 AND t.test_sub_type = (SELECT tst.id FROM test_sub_type tst WHERE tst."name" = $2)
+
+INSERT INTO public.test_type ("name") VALUES
+     ('VISUAL_INSPECTION'),
+     ('Measurement');
+     
+    
+    SELECT *
+    FROM test_result tr 
+    JOIN test t ON t.test_sub_type = (SELECT tst.id FROM test_sub_type tst WHERE tst."name" = 'VISUAL')
+    JOIN test_sub_type tst ON tst.id =(SELECT tst.id FROM test_sub_type tst WHERE tst."name" = 'VISUAL')
+    WHERE tst."name" ='VISUAL'
+    
+    
+    SELECT tst.id FROM test_sub_type tst WHERE tst."name" = $1
+    
+    
+    INSERT INTO public.test
+(production_order_id, process_id, test_sub_type)
+VALUES(123, 1, ( SELECT tst.id FROM test_sub_type tst WHERE tst."name" = $1));
+
+SELECT 
+tr.test_param_id ,
+tr.value ,
+tr.min ,
+tr.max ,
+tr.pass ,
+tr.sample ,
+tr.performed_by ,
+tr.performed_on 
+FROM test_result tr 
+LEFT JOIN test t ON t.id = tr.test_id 
+LEFT JOIN test_sub_type tst ON tst.id = t.test_sub_type 
+WHERE t.production_order_id =1 AND t.id =45 AND tst."name" ='VISUAL'
+ORDER BY t.production_order_id DESC 
+
+INSERT INTO test_result 
+(value)
+
+values( CASE 
+ 	WHEN $1 = true THEN 1
+ 	WHEN $1 = false THEN 0
+ 	ELSE $1
+ END )
+ 
+ SELECT 
+ 
+ 
+ SELECT
+      po.id AS po_id,
+      ls.id AS ls_id,
+      msn.id AS sach_id,
+      po.po_number,
+      po.po_type order_type,
+      msn.sach_no,
+      element_per_wheel,
+      CASE
+        WHEN mp.process_number = 220
+        THEN po.taping_quantity
+        ELSE po.target_quantity
+      END AS target_quantity,
+      ls.ls_value,
+      po.box_size,
+      po.pmt_delay_weeks,
+      po.completed_on,
+      po.is_capa_raised,
+      po.remarks,
+      po.current_master_process_id,
+      --COALESCE (apl.stage,'new') AS aoi_stage,
+      COALESCE (ttl.trolley_id,NULL) AS trolley_id,
+      --jsonb_text(sr.recipe -> 'spray_material') as material,
+      jsonb_array_elements_text(COALESCE (sr.recipe -> 'spray_material','[null]'::jsonb)) as material,
+      mcul.material_carrier_id ,
+      CASE WHEN ppl2.id IS NOT NULL THEN true ELSE false END AS po_in_process,
+      CASE WHEN ppl2.id IS NOT NULL AND ppl2.setup_completed_on IS NOT NULL THEN true ELSE false END AS init_setup_done
+    FROM
+      production_orders po
+    JOIN master_sach_nos msn ON msn.id = po.master_sach_id
+    JOIN sach_allowed_machines sam ON (sam.sach_id = msn.id AND sam.process_id = po.current_master_process_id)
+    JOIN master_lead_spaces ls ON ls.id = msn.master_lead_space_id
+    JOIN master_processes mp ON mp.id = po.current_master_process_id
+    LEFT JOIN po_process_logs ppl2 ON (ppl2.production_order_id = po.id AND ppl2.machine_id = $2 AND ppl2.started_on IS NOT NULL)
+    LEFT JOIN sach_revisions sr on po.master_sach_id  = sr.master_sach_id
+    LEFT JOIN tempering_trolley_log ttl ON ttl.production_order_id =po.id
+    LEFT JOIN material_carrier_usage_logs mcul ON mcul.po_id = po.id 
+    --LEFT JOIN aoi_process_stage_log apl ON apl.production_order_id = po.id
+    --LEFT JOIN LATERAL jsonb_array_elements_text(sr.recipe -> 'spray_material') as material ON true
+    WHERE
+      $2 = ANY(sam.machine_ids) AND
+      po.current_master_process_id = $1 AND
+      po.id NOT IN (SELECT production_order_id FROM po_process_logs ppl WHERE machine_id <> $2 AND master_process_id = $1 AND started_on IS NOT NULL AND completed_on IS NULL)
+      AND po.completed_on IS NULL
+      AND sr.master_process_id  =$1
+      AND mcul.master_process_id = $1
+--      GROUP BY po.id
+    ORDER BY po.id
+    
+    SELECT 
+   count( mcul.material_carrier_id )
+    FROM material_carrier_usage_logs mcul 
+    WHERE mcul.po_id = 11 AND mcul.master_process_id = 10
+    
+    SELECT 
+        tr.test_param_id ,
+        tr.value ,
+        tr.min ,
+        tr.max ,
+        tr.pass ,
+        tr.sample ,
+        tr.performed_by ,
+        tr.performed_on 
+    FROM test_result tr 
+    LEFT JOIN test t ON t.id = tr.test_id 
+    LEFT JOIN test_sub_type tst ON tst.id = t.test_sub_type 
+    LEFT JOIN test_params tp ON tp.id = tr.test_param_id 
+    WHERE t.production_order_id =$1 AND t.id =$2 AND tst."name" =$3
+    
+    
+    
+ SELECT
+      mc.id,
+      mc.name,
+      mct.name as carrier_type,
+      mc.rfid_epc
+    FROM material_carrier_usage_logs mcul
+    LEFT JOIN material_carriers mc ON (mc.id = mcul.material_carrier_id)
+    LEFT join material_carrier_types mct on mct.id = mc.material_carrier_type_id
+    WHERE
+      mcul.material_carrier_id IS NOT NULL AND
+      mcul.binded_on IS NOT NULL AND
+      released_on IS NULL AND
+      po_id = $2
+      AND
+      master_process_id = (
+        SELECT id
+        FROM master_processes
+        WHERE
+          is_published IS TRUE AND
+          is_show_on_batch_card IS TRUE AND
+          process_number < (
+            SELECT
+                process_number
+              FROM master_processes mp
+              WHERE mp.id = $1
+          )
+        ORDER BY process_number DESC LIMIT 1
+      )
