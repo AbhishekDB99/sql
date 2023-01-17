@@ -3540,3 +3540,52 @@ values( CASE
           )
         ORDER BY process_number DESC LIMIT 1
       )
+
+
+       SELECT 
+      mcul.material_carrier_id ,
+      sr.recipe ->'tempering_temperature' AS tray_temperature,
+      --count(mcul.material_carrier_id),
+      po.po_number ,
+      mc.rfid_epc 
+    FROM material_carrier_usage_logs mcul 
+    LEFT JOIN sach_revisions sr ON sr.master_process_id = mcul.master_process_id
+    LEFT JOIN production_orders po ON po.id = mcul.po_id 
+    LEFT JOIN material_carriers mc ON mc.id = mcul.material_carrier_id 
+    WHERE mcul.po_id = ANY($1) AND mcul.master_process_id = $2
+
+    WITH count AS (
+       SELECT 
+     count(mcul.material_carrier_id )
+      FROM material_carrier_usage_logs mcul 
+      WHERE mcul.po_id = 8 AND mcul.master_process_id =12
+      ),
+      details AS (
+            SELECT 
+      mcul.material_carrier_id ,
+      sr.recipe ->'tempering_temperature' AS tray_temperature,
+      po.po_number ,
+      mc.rfid_epc 
+      FROM material_carrier_usage_logs mcul 
+      LEFT JOIN sach_revisions sr ON sr.master_process_id = mcul.master_process_id
+      LEFT JOIN production_orders po ON po.id = mcul.po_id 
+      LEFT JOIN material_carriers mc ON mc.id = mcul.material_carrier_id 
+      WHERE mcul.po_id =8 AND mcul.master_process_id = 12
+      )
+      SELECT 
+      count.count AS total_count,
+      details.material_carrier_id,
+      details.tray_temperature,
+      details.po_number,
+      details.rfid_epc
+      FROM count,details
+      
+      SELECT 
+    count( po.po_number  )
+     FROM material_carrier_usage_logs mcul 
+     LEFT JOIN production_orders po ON po.id = mcul.po_id 
+     WHERE mcul.po_id =8 AND mcul.master_process_id = 12
+     
+     
+     INSERT INTO public.videojet_logs
+        VALUES ($1)
