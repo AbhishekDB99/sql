@@ -3589,3 +3589,357 @@ values( CASE
      
      INSERT INTO public.videojet_logs
         VALUES ($1)
+
+
+SELECT 
+      mcul.material_carrier_id ,
+      sr.recipe ->'tempering_temperature' AS tray_temperature,
+      sr.master_process_id ,
+      mcul.master_process_id ,
+      po.current_master_process_id ,
+      ( SELECT 
+    	count( po.po_number )
+     FROM material_carrier_usage_logs mcul2
+     LEFT JOIN production_orders po ON po.id = mcul.po_id 
+     WHERE mcul2.po_id = mcul.po_id AND mcul2.master_process_id = mcul.master_process_id) AS counta,
+      po.po_number ,
+      mc.rfid_epc 
+    FROM material_carrier_usage_logs mcul 
+    LEFT JOIN production_orders po ON po.id = mcul.po_id 
+    LEFT JOIN sach_revisions sr ON sr.master_process_id = mcul.master_process_id AND sr.master_sach_id = po.master_sach_id 
+    LEFT JOIN material_carriers mc ON mc.id = mcul.material_carrier_id 
+    WHERE mcul.po_id = ANY($1) AND mcul.master_process_id = $2 AND mcul.machine_id = $2
+
+    SELECT
+--    	substring(mc2.name, 1, 24) AS prefix,
+    	substring(mc2.name, 1, 24) AS prefix,
+    	COUNT(mc2.id)
+    FROM material_carriers mc2 
+    LEFT JOIN wheel_spray_cycles wsc ON wsc.master_carrier_id = mc2.id 
+    WHERE wsc.production_order_id =8 AND wsc.completed_on IS NOT NULL 
+    GROUP BY substring(mc2.name, 1, 24)
+
+
+    
+    SELECT
+   	mc.id  
+    FROM material_carriers mc WHERE substring(mc.name, 1, 24) = 'N_DC-AUTO_MSK_Bobbin_001'
+    
+    
+    SELECT
+      mc.id,
+      mc.name,
+      mct.name as carrier_type,
+      mc.rfid_epc
+    FROM material_carrier_usage_logs mcul
+    LEFT JOIN material_carriers mc ON (mc.id = mcul.material_carrier_id)
+    LEFT join material_carrier_types mct on mct.id = mc.material_carrier_type_id
+    WHERE
+      mcul.material_carrier_id IS NOT NULL AND
+      mcul.binded_on IS NOT NULL AND
+      released_on IS NULL AND
+      po_id = $2
+      AND
+      master_process_id = (
+        SELECT id
+        FROM master_processes
+        WHERE
+          is_published IS TRUE AND
+          is_show_on_batch_card IS TRUE AND
+          process_number < (
+            SELECT
+                process_number
+              FROM master_processes mp
+              WHERE mp.id = $1
+          )
+        ORDER BY process_number DESC LIMIT 1
+      )
+      
+      
+      
+       WITH actual AS (
+    SELECT
+      mm.id,
+      mul.material_code,
+      material_specification->>'diameter' wire_diameter,
+      material_specification->>'material_name' material_name
+    FROM master_materials mm
+    JOIN material_usage_logs mul on mul.material_id =mm.id
+    WHERE mm.id in (
+      SELECT distinct on (mul.material_code)
+        mul.material_id
+      FROM material_usage_logs mul
+      WHERE mul.production_order_id = (  select production_order_id from po_process_logs ppl where master_process_id =10
+  order by id 
+  limit 1) and mul.machine_id = $1
+    )
+  )
+  SELECT
+    actual.id as act_id,
+    actual.material_code as act_m_code,
+    actual.wire_diameter as act_w_dia,
+    actual.material_name as act_m_name
+  FROM actual
+  
+  
+  SELECT 
+  wsc.id 
+  FROM wheel_spray_cycles wsc 
+  WHERE la_loaded_on IS NOT NULL AND g1_loaded_on IS NULL 
+  ORDER BY id DESC LIMIT 1
+  
+  
+  SELECT 
+  *
+  FROM production_orders po 
+  WHERE po.current_master_process_id = 10
+  
+  SELECT 
+      po.id AS po_id,
+--        ls.id AS ls_id,
+--        msn.id AS sach_id,
+        po.po_number,
+--        msn.sach_no,
+--        ls.ls_value,
+        po.target_quantity
+--        m.machine_name
+      FROM 
+        production_orders po 
+--      JOIN master_sach_nos msn ON msn.id = po.master_sach_id
+--      JOIN master_lead_spaces ls ON ls.id = msn.master_lead_space_id
+--      JOIN po_process_logs ppl ON ppl .completed_on IS NOT NULL  
+--      JOIN machines m ON m.id =ppl .machine_id 
+      WHERE    
+        po.current_master_process_id = $1  
+        
+        
+        
+        
+        SELECT 
+      tj.trolley_id,
+      mc.name trolley_name,
+      mc.rfid_epc trolley_epc,
+      sr.recipe ->'tempering_temperature' as set_temperature,
+      ttl.tray_set as trays,
+      ttl.count,
+      po.po_number ,
+      po.id production_order_id
+  FROM 
+  tempering_jobs tj 
+  LEFT JOIN material_carriers mc ON mc.id =tj.trolley_id 
+  LEFT JOIN tempering_trolley_log ttl ON ttl.trolley_id =tj.trolley_id 
+  LEFT JOIN production_orders po ON po.id = ttl.production_order_id 
+  LEFT  JOIN  sach_revisions sr ON sr.master_sach_id = po.master_sach_id 
+  WHERE tj.completed_on IS NOT  NULL AND sr.master_process_id = $1 AND tj.trolley_id=$2
+  
+  
+  
+  SELECT
+      mc.id,
+      mc.name,
+      mct.name as carrier_type,
+      mc.rfid_epc,
+      po.id ,
+      po.po_number ,
+      msn.sach_no 
+    FROM material_carrier_usage_logs mcul
+    LEFT JOIN material_carriers mc ON (mc.id = mcul.material_carrier_id)
+    LEFT join material_carrier_types mct on mct.id = mc.material_carrier_type_id
+    LEFT JOIN production_orders po ON po.id = mcul .po_id 
+    LEFT JOIN master_sach_nos msn ON msn.id = po.master_sach_id 
+    WHERE
+      mcul.material_carrier_id IS NOT NULL AND
+      mcul.binded_on IS NOT NULL AND
+      released_on IS NULL AND
+      po_id = any({"11","10","8"})
+      AND
+      master_process_id = (
+        SELECT id
+        FROM master_processes
+        WHERE
+          is_published IS TRUE AND
+          is_show_on_batch_card IS TRUE AND
+          process_number < (
+            SELECT
+                process_number
+              FROM master_processes mp
+              WHERE mp.id = $1
+          )
+        ORDER BY process_number DESC LIMIT 1
+      )
+      
+      SELECT 
+      po.id AS po_id,
+        ls.id AS ls_id,
+        msn.id AS sach_id,
+        po.po_number,
+        msn.sach_no,
+        ls.ls_value,
+        po.target_quantity,
+        m.machine_name
+      FROM 
+        production_orders po 
+      JOIN master_sach_nos msn ON msn.id = po.master_sach_id
+      JOIN master_lead_spaces ls ON ls.id = msn.master_lead_space_id
+      JOIN po_process_logs ppl ON ppl .completed_on IS NOT NULL AND ppl .production_order_id = po.id  
+      JOIN machines m ON m.id =ppl .machine_id 
+      WHERE 
+        po.current_master_process_id = $1  
+     ORDER BY ppl.master_process_id ASC LIMIT 1 
+     
+     
+    
+    SELECT
+      id,
+      material_code,
+      material_specification->>'diameter' wire_diameter,
+      material_specification->>'material_name' material_name
+    FROM master_materials mm
+    WHERE mm.id in (
+      SELECT unnest (materials_ids) mids
+      FROM sach_allowed_materials sam
+      WHERE sam.sach_id = $1 and sam.process_id = $2
+    )
+    
+    
+    
+    WITH actual AS (
+    SELECT
+      mm.id,
+      mul.material_code,
+      material_specification->>'diameter' wire_diameter,
+      material_specification->>'material_name' material_name
+    FROM master_materials mm
+    JOIN material_usage_logs mul on mul.material_id =mm.id
+    WHERE mm.id in (
+      SELECT distinct on (mul.material_code)
+        mul.material_id
+      FROM material_usage_logs mul
+      WHERE mul.production_order_id = (  select production_order_id from po_process_logs ppl where master_process_id =10
+  order by id 
+  limit 1) and mul.machine_id = $1
+  ORDER BY mul.id DESC
+      LIMIT 2
+    )
+  )
+  SELECT
+    actual.id as act_id,
+    actual.material_code as act_m_code,
+    actual.wire_diameter as act_w_dia,
+    actual.material_name as act_m_name
+  FROM actual
+  
+  SELECT 
+      mm.id,
+      mm.material_code ,
+      mm.material_specification->>'diameter' wire_diameter,
+      mm.material_specification->>'material_name' material_name
+    FROM 
+    master_materials mm 
+    WHERE id IN (
+      SELECT 
+        material_id 
+      from material_usage_logs mul
+      WHERE production_order_id = (  select production_order_id from po_process_logs ppl where master_process_id =$1 AND ppl.machine_id =$2
+  order by id desc
+  limit 1)
+      AND master_process_id = $1
+      ORDER BY mul.id DESC
+      LIMIT 2
+    ) 
+    
+    
+    id: 6,
+    material_code: 'Z99001Z2500R462R',
+    wire_diameter: '1.6',
+    material_name: 'zinc'
+    
+    
+    SELECT 
+      mm.id,
+      mul2.material_code ,
+      mm.material_specification->>'diameter' wire_diameter,
+      mm.material_specification->>'material_name' material_name,
+    FROM 
+    master_materials mm 
+    LEFT JOIN material_usage_logs mul2 ON mul2.material_id = mm.id 
+    LEFT JOIN po_process_logs ppl2  ON ppl2.production_order_id  = mul2.production_order_id  
+    WHERE mm.id IN (
+      SELECT 
+        mul.material_id 
+      from material_usage_logs mul
+      WHERE production_order_id = (  
+        SELECT ppl.production_order_id FROM po_process_logs ppl where master_process_id =$1 AND ppl.machine_id =$2
+  order by id desc
+  limit 1)
+      AND master_process_id = $1
+      AND mul2.production_order_id = ppl2.production_order_id 
+      ORDER BY mul.id DESC
+      LIMIT 2
+    )
+    
+    
+    SELECT 
+    *
+    FROM wheel_spray_cycles wsc 
+    WHERE wsc.machine_id =10 AND wsc.g2_loaded_on IS NULL OR  wsc.completed_on IS NULL
+    
+    
+    UPDATE wheel_spray_cycles 
+    SET wheel_count = 2
+    WHERE production_order_id = 10 AND machine_id = 10 AND master_process_id = 10 AND master_carrier_id = 404
+    
+    SELECT
+      po.id AS po_id,
+      ls.id AS ls_id,
+      msn.id AS sach_id,
+      po.po_number,
+      po.po_type order_type,
+      msn.sach_no,
+      element_per_wheel,
+      po.target_quantity,
+      ls.ls_value,
+      po.box_size,
+      po.pmt_delay_weeks,
+      po.completed_on,
+      po.is_capa_raised,
+      po.remarks,
+      po.current_master_process_id,
+      po.is_second_metal_spray 
+    FROM
+      production_orders po
+    JOIN master_sach_nos msn ON msn.id = po.master_sach_id
+    LEFT JOIN master_lead_spaces ls ON ls.id = msn.master_lead_space_id
+    WHERE
+      po.id = $1
+      
+     
+      WITH previous_po_details AS (
+      SELECT 
+      *
+      FROM po_process_logs ppl 
+      LEFT JOIN production_orders po ON po.id = ppl.production_order_id  
+      LEFT JOIN master_sach_nos msn ON msn.id = po.master_sach_id 
+      LEFT JOIN master_lead_spaces mls ON mls.id = msn.master_lead_space_id 
+      WHERE ppl.master_process_id = 15 AND ppl.machine_id = 168
+      ORDER BY ppl.id DESC LIMIT 1
+      ),
+      current_po_details AS (
+      SELECT 
+      *
+      FROM production_orders po2 
+      LEFT JOIN master_sach_nos msn2 ON msn2.id = po2.master_sach_id 
+      LEFT JOIN master_lead_spaces mls2 ON mls2.id = msn2.master_lead_space_id  
+      WHERE po2.id =10
+      )
+      SELECT 
+      CASE 
+      	WHEN ppd.ls_value != cpd.ls_value THEN 1
+      END AS lead_space_changeover,
+      CASE
+      	WHEN ppd.capacitor_value != cpd.capacitor_value THEN 1
+      END AS cap_value_changeover,
+      CASE
+      	WHEN ppd.box_size != cpd.box_size THEN 1
+      END AS box_size_changeover
+      FROM previous_po_details ppd, current_po_details cpd
